@@ -18,7 +18,7 @@ __global__ void flash_fwd_kernel(Flash_fwd_params params) {
 
 template<typename Kernel_traits, bool Is_blocked_KV, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV>
 __global__ void flash_fwd_splitkv_kernel(Flash_fwd_params params) {
-    flash::compute_attn_splitkv<Kernel_traits, Is_blocked_KV, Is_causal, Is_local, Is_even_MN, Is_even_K, Split, Append_KV>(params);
+    flash::compute_attn_splitkv<Kernel_traits, Is_blocked_KV, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Split, Append_KV>(params);
 }
 
 template<typename Kernel_traits, int kBlockM, int Log_max_splits, bool Is_even_K>
