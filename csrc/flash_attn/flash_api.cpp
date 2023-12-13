@@ -1430,7 +1430,7 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
     const int seqlen_k = max_num_blocks_per_seq * block_size;
     const int num_heads_k = kcache.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be postive");
-    TORCH_CHECK(head_size <= 256, "FlashAttention forward only supports head dimension at most 256");
+    TORCH_CHECK(head_size <= 512, "FlashAttention forward only supports head dimension at most 512");
     TORCH_CHECK(head_size % 8 == 0);
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
