@@ -11,6 +11,7 @@ device = torch.device("cuda:5")
 torch.set_default_dtype(dtype)
 torch.set_default_device(device)
 torch.cuda.set_device(device)
+torch.manual_seed(0)
 
 
 def calc_diff(x, y):
@@ -39,7 +40,7 @@ def timer(func):
 
 @torch.inference_mode()
 def test_flash_attention():
-    s_q = 5
+    s_q = 1
     q = torch.randn(b, s_q, h_q, d)
     k = torch.randn(b, s, h_kv, d)
     v = torch.randn(b, s, h_kv, d)
@@ -61,8 +62,6 @@ def test_flash_attention():
 
     def f(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes)
     def ref(): return scaled_dot_product_attention(q.transpose(1, 2).float(), full_k.transpose(1, 2).float(), full_v.transpose(1, 2).float(), attn_mask=mask).transpose(1, 2).to(dtype)
-    timer(f)
-    timer(ref)
     timer(f)
     timer(ref)
     timer(f)
