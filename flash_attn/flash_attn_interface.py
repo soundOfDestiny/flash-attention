@@ -1198,6 +1198,8 @@ def flash_attn_with_blocked_kvcache(
             (q.shape[0],), cache_seqlens, dtype=torch.int32, device=q.device
         )
         cache_seqlens = maybe_contiguous(cache_seqlens)
+    if alibi_slopes is not None:
+        alibi_slopes = alibi_slopes.expand(q.shape[0], -1)
     out, softmax_lse = flash_attn_cuda.fwd_blocked_kvcache(
         q,
         k_cache,

@@ -51,8 +51,8 @@ def test_flash_attention():
     block_table = torch.arange(b * s // block_size, dtype=torch.int32).view(b, s // block_size)
     cache_seqlens = torch.full((b,), s, dtype=torch.int32)
 
-    alibi_slopes = torch.rand(h_q, dtype=torch.float32).expand(b, h_q)
-    alibi_mask = (torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :] * alibi_slopes[:, :, None, None]
+    alibi_slopes = torch.rand(h_q, dtype=torch.float32)
+    alibi_mask = (torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :] * alibi_slopes[None, :, None, None]
     causal_mask = ~torch.ones(s_q, s, dtype=torch.bool).tril(diagonal=s-s_q)
     mask = alibi_mask.masked_fill(causal_mask, torch.finfo(torch.float32).min)
 
