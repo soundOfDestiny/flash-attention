@@ -22,19 +22,23 @@ inline __device__ void apply_alibi(Tensor<Engine, Layout> &tensor,
                                    const int warp_row_stride,
                                    const int head_idx,
                                    const float softmax_scale,
-                                   const float alibi_slope) {
+                                   const float alibi_slope,
+                                   const float *alibi_slopes_ptr = nullptr) {
     // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
     const int lane_id = threadIdx.x % 32;
     const int row_idx_offset = row_idx_offset_;
     const int col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
-    const float alibi_slope_unscaled = alibi_slope / softmax_scale;
+    float alibi_slope_unscaled = alibi_slope / softmax_scale;
     #pragma unroll
     for (int mi = 0; mi < size<0, 1>(tensor); ++mi) {
         const int row_idx_base = row_idx_offset + mi * warp_row_stride;
         #pragma unroll
         for (int i = 0; i < size<0, 0>(tensor); ++i) {
             const int row_idx = row_idx_base + i * 8;
+            if (alibi_slopes_ptr && row_idx < max_seqlen_q) {
+                alibi_slope_unscaled = alibi_slopes_ptr[row_idx] / softmax_scale;
+            }
             #pragma unroll
             for (int nj = 0; nj < size<1, 1>(tensor); ++nj) {
                 const int col_idx_base = col_idx_offset + nj * 8;

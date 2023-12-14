@@ -971,19 +971,13 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     // We will have at least 1 "masking" iteration.
 
     float alibi_slope = 0.0f;
+    float *__restrict__ alibi_slopes_ptr = nullptr;
     if (Has_alibi) {
-        Tensor gAS = make_tensor(
-        make_gmem_ptr(
-            reinterpret_cast<ElementAccum *>(params.alibi_slopes_ptr) 
-            + bidb * params.alibi_slopes_batch_stride + bidh
-        ),
-        Shape<_1>{});
-        Tensor rAS = make_fragment_like(gAS);
-        cute::copy(gAS, rAS);
-        alibi_slope = rAS(0);
-        // if (m_block == 0 && tidx == 0) {
-        //     printf("%d,%d,%f\n", bidb, bidh, alibi_slope);
-        // }
+        if (!params.seqlenq_ngroups_swapped) {
+            alibi_slope = reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh];
+        } else {
+            alibi_slopes_ptr = reinterpret_cast<float *>(params.alibi_slopes_ptr) + bidb * params.alibi_slopes_batch_stride + bidh * params.seqlen_q;
+        }
     }
 
     // If not even_N, then seqlen_k might end in the middle of a block. In that case we need to
@@ -1032,7 +1026,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 bidh, params.scale_softmax, 
-                alibi_slope
+                alibi_slope, alibi_slopes_ptr
             );
         }
 
@@ -1137,7 +1131,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 bidh, params.scale_softmax, 
-                alibi_slope
+                alibi_slope, alibi_slopes_ptr
             );
         }
 

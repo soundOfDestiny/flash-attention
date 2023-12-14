@@ -1584,7 +1584,8 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
         CHECK_DEVICE(alibi_slopes);
         TORCH_CHECK(alibi_slopes.stride(-1) == 1, "ALiBi slopes tensor must have contiguous last dimension");
-        CHECK_SHAPE(alibi_slopes, batch_size, num_heads);
+        params.seqlenq_ngroups_swapped = seqlenq_ngroups_swapped;
+        CHECK_SHAPE(alibi_slopes, batch_size, !seqlenq_ngroups_swapped ? num_heads : num_heads_k * seqlen_q);
         params.has_alibi = true;
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.stride(0);
