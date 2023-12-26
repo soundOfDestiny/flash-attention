@@ -948,7 +948,25 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     clear(acc_o);
 
-    float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    float alibi_slope[/* MMA_N */kBlockM / (kNWarps * 16)][2] = {0};
+    if (Has_alibi) {
+        const int row_idx_offset = m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4;
+        const int warp_row_stride = kNWarps * 16;
+        for (int mi = 0; mi < kBlockM / (kNWarps * 16); ++mi) {
+            const int row_idx_base = row_idx_offset + mi * warp_row_stride;
+            #pragma unroll
+            for (int i = 0; i < 2; ++i) {
+                const int row_idx = row_idx_base + i * 8;
+                if (row_idx < params.seqlen_q) {
+                    if (!params.seqlenq_ngroups_swapped) {
+                        alibi_slope[mi][i] = reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+                    } else {
+                        alibi_slope[mi][i] = reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh * params.seqlen_q + row_idx] / params.scale_softmax;
+                    }
+                }
+            }
+        }
+    }
 
     // For performance reason, we separate out two kinds of iterations:
     // those that need masking on S, and those that don't.
@@ -994,14 +1012,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
 
         if (Has_alibi) {
-            flash::apply_alibi<Is_causal>(
+            flash::apply_alibi_var_slope<Is_causal>(
                 scores, 
                 n_block * kBlockN, 
                 binfo.actual_seqlen_k,
                 m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
-                alibi_slope
+                alibi_slope,
+                params.seqlenq_ngroups_swapped
             );
         }
 
@@ -1098,14 +1117,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
 
         if (Has_alibi) {
-            flash::apply_alibi<Is_causal>(
+            flash::apply_alibi_var_slope<Is_causal>(
                 scores, 
                 n_block * kBlockN, 
                 binfo.actual_seqlen_k,
                 m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
-                alibi_slope
+                alibi_slope,
+                params.seqlenq_ngroups_swapped
             );
         }
 
