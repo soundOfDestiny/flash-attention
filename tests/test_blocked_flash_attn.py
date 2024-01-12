@@ -3,10 +3,10 @@ from torch.nn.functional import scaled_dot_product_attention
 from flash_attn.flash_attn_interface import get_kvcache_block_size, flash_attn_with_blocked_kvcache
 
 
-b, s, h_q, h_kv, d = 1, 131072, 32, 1, 512
+b, s, h_q, h_kv, d = 1, 131072, 16, 2, 128
 block_size = get_kvcache_block_size(d)
 dtype = torch.bfloat16
-device = torch.device("cuda:5")
+device = torch.device("cuda:0")
 torch.set_default_dtype(dtype)
 torch.set_default_device(device)
 torch.cuda.set_device(device)
@@ -59,17 +59,20 @@ def test_flash_attention():
     for _ in range(100):
         torch.ones(1 << 20)
 
-    def f(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes)
-    def ref(): return scaled_dot_product_attention(q.transpose(1, 2).float(), full_k.transpose(1, 2).float(), full_v.transpose(1, 2).float(), attn_mask=mask).transpose(1, 2).to(dtype)
-    timer(f)
-    timer(ref)
-    timer(f)
-    timer(ref)
+    def blocked_flash(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes)
+    def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2), full_k.transpose(1, 2), full_v.transpose(1, 2), attn_mask=mask.to(dtype)).transpose(1, 2)
+    def ref(): return scaled_dot_product_attention(q.transpose(1, 2).double(), full_k.transpose(1, 2).double(), full_v.transpose(1, 2).double(), attn_mask=mask.double()).transpose(1, 2)
 
-    out_block = f()
-    out_flash = ref()
-    print(calc_diff(out_block, out_flash))
-    torch.testing.assert_close(out_block, out_flash)
+    timer(blocked_flash)
+    timer(blocked_flash)
+
+    out_blocked_flash = blocked_flash()
+    out_torch_attn = torch_attn()
+    out_ref = ref()
+    print("blocked flash diff:", calc_diff(out_blocked_flash, out_ref), (out_blocked_flash - out_ref).abs().max().item())
+    print("torch_attn diff:", calc_diff(out_torch_attn, out_ref), (out_torch_attn - out_ref).abs().max().item())
+    assert calc_diff(out_blocked_flash, out_ref) <= calc_diff(out_torch_attn, out_ref)
+    assert (out_blocked_flash - out_ref).abs().max().item() <= (out_torch_attn - out_ref).abs().max().item()
 
 
 if __name__ == "__main__":
