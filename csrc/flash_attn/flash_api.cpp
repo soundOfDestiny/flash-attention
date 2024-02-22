@@ -257,6 +257,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
         c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+        const float alibi_exp,
         const float p_dropout,
         const float softmax_scale,
         bool is_causal,
@@ -425,6 +426,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }
@@ -462,6 +464,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                const at::Tensor &cu_seqlens_k,  // b+1
                c10::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
                c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+               const float alibi_exp,
                const int max_seqlen_q,
                const int max_seqlen_k,
                const float p_dropout,
@@ -623,6 +626,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }
@@ -678,6 +682,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         c10::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+        const float alibi_exp,
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
@@ -875,6 +880,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }
@@ -915,6 +921,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor &cu_seqlens_q,  // b+1
                const at::Tensor &cu_seqlens_k,  // b+1
                c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+               const float alibi_exp,
                const int max_seqlen_q,
                const int max_seqlen_k,          // max sequence length to choose the kernel
                const float p_dropout,         // probability to drop
@@ -1131,6 +1138,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }
@@ -1169,6 +1177,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
                 c10::optional<const at::Tensor> &rotary_sin_, // seqlen_ro x (rotary_dim / 2)
                 c10::optional<const at::Tensor> &cache_batch_idx_, // indices to index into the KV cache
                 c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+                const float alibi_exp,
                 c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
                 const float softmax_scale,
                 bool is_causal,
@@ -1393,6 +1402,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }
@@ -1430,6 +1440,7 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
                         c10::optional<const at::Tensor> &rotary_cos_, // seqlen_ro x (rotary_dim / 2)
                         c10::optional<const at::Tensor> &rotary_sin_, // seqlen_ro x (rotary_dim / 2)
                         c10::optional<at::Tensor> &alibi_slopes_,     // batch_size x num_heads
+                        const float alibi_exp,
                         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
                         const float softmax_scale,
                         bool is_causal,
@@ -1633,6 +1644,7 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
         TORCH_CHECK(alibi_slopes.size(-1) == !seqlenq_ngroups_swapped ? num_heads : num_heads_k * seqlen_q);
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
     }

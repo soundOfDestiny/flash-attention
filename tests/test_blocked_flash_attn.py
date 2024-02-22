@@ -1,6 +1,6 @@
 import torch
 from torch.nn.functional import scaled_dot_product_attention
-from flash_attn.flash_attn_interface import get_kvcache_block_size, flash_attn_with_blocked_kvcache
+from flash_attn.flash_attn_interface import get_kvcache_block_size, flash_attn_with_blocked_kvcache, flash_attn_func
 
 
 b, s, h_q, h_kv, d = 1, 131072, 16, 2, 128
@@ -51,7 +51,9 @@ def test_flash_attention():
     cache_seqlens = torch.full((b,), s, dtype=torch.int32)
 
     alibi_slopes = torch.rand(h_q, dtype=torch.float32)
-    alibi_mask = (torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :] * alibi_slopes[None, :, None, None]
+    alibi_exp = 0.5
+    alibi_mask = -(torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :].float().abs().pow(alibi_exp)
+    alibi_mask = alibi_mask * alibi_slopes[None, :, None, None]
     causal_mask = ~torch.ones(s_q, s, dtype=torch.bool).tril(diagonal=s-s_q)
     mask = alibi_mask.masked_fill(causal_mask, torch.finfo(torch.float32).min)
 
@@ -59,7 +61,8 @@ def test_flash_attention():
     for _ in range(100):
         torch.ones(1 << 20)
 
-    def blocked_flash(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes)
+    def blocked_flash(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes, alibi_exp=alibi_exp)
+    def flash(): return flash_attn_func(q, k, v, causal=True, alibi_slopes=alibi_slopes, alibi_exp=alibi_exp)
     def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2), full_k.transpose(1, 2), full_v.transpose(1, 2), attn_mask=mask.to(dtype)).transpose(1, 2)
     def ref(): return scaled_dot_product_attention(q.transpose(1, 2).double(), full_k.transpose(1, 2).double(), full_v.transpose(1, 2).double(), attn_mask=mask.double()).transpose(1, 2)
 
@@ -67,9 +70,11 @@ def test_flash_attention():
     timer(blocked_flash)
 
     out_blocked_flash = blocked_flash()
+    out_flash = flash()
     out_torch_attn = torch_attn()
     out_ref = ref()
     print("blocked flash diff:", calc_diff(out_blocked_flash, out_ref), (out_blocked_flash - out_ref).abs().max().item())
+    print("flash diff:", calc_diff(out_flash, out_ref), (out_flash - out_ref).abs().max().item())
     print("torch_attn diff:", calc_diff(out_torch_attn, out_ref), (out_torch_attn - out_ref).abs().max().item())
     assert calc_diff(out_blocked_flash, out_ref) <= calc_diff(out_torch_attn, out_ref)
     assert (out_blocked_flash - out_ref).abs().max().item() <= (out_torch_attn - out_ref).abs().max().item()
