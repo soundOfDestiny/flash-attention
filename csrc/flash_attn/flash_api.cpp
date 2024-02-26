@@ -889,6 +889,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     }
 
     at::Tensor alibi_slopes_grad;
+    params.alibi_slopes_grad_ptr = nullptr;
     if (alibi_slopes_.has_value()) {
         auto alibi_slopes = alibi_slopes_.value();
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
@@ -905,6 +906,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         params.alibi_slopes_ptr = nullptr;
     }
     at::Tensor alibi_exps_grad;
+    params.alibi_exps_grad_ptr = nullptr;
     if (alibi_exps_.has_value()) {
         auto alibi_exps = alibi_exps_.value();
         TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
@@ -1167,6 +1169,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     }
 
     at::Tensor alibi_slopes_grad;
+    params.alibi_slopes_grad_ptr = nullptr;
     if (alibi_slopes_.has_value()) {
         auto alibi_slopes = alibi_slopes_.value();
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
@@ -1183,6 +1186,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         params.alibi_slopes_ptr = nullptr;
     }
     at::Tensor alibi_exps_grad;
+    params.alibi_exps_grad_ptr = nullptr;
     if (alibi_exps_.has_value()) {
         auto alibi_exps = alibi_exps_.value();
         TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
