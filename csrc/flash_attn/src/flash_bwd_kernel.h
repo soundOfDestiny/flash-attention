@@ -803,6 +803,9 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     clear(acc_dk);
 
     float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    float alibi_exp = !Has_alibi || !params.alibi_exps_ptr ? 1.0f : reinterpret_cast<float *>(params.alibi_exps_ptr)[bidb * params.alibi_exps_batch_stride + bidh];
+    float alibi_slope_grad = 0.0f;
+    float alibi_exp_grad = 0.0f;
 
     for (; m_block >= m_block_min; --m_block) {
         Tensor acc_s = partition_fragment_C(tiled_mma_sdp, Shape<Int<kBlockM>, Int<kBlockN>>{});  // (MMA=4, MMA_N, MMA_N)
@@ -837,7 +840,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                 binfo.actual_seqlen_q, 
                 AtomLayoutMS * 16,
                 alibi_slope,
-                params.alibi_exp
+                alibi_exp
             );
         }
 
@@ -941,6 +944,35 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
             }
         }
         // if (cute::thread0()) { print(dS); }
+
+        if (Has_alibi) {
+            if (params.alibi_slopes_grad_ptr) {
+                flash::apply_alibi_slope_grad<Is_causal>(
+                    alibi_slope_grad,
+                    dS,
+                    n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                    binfo.actual_seqlen_k,
+                    m_block * kBlockM + get<0>(taccScS_row(0)),
+                    binfo.actual_seqlen_q,
+                    AtomLayoutMS * 16,
+                    alibi_slope * params.scale_softmax,
+                    alibi_exp
+                );
+            }
+            if (params.alibi_exps_grad_ptr) {
+                flash::apply_alibi_exp_grad<Is_causal>(
+                    alibi_exp_grad,
+                    dS,
+                    n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                    binfo.actual_seqlen_k,
+                    m_block * kBlockM + get<0>(taccScS_row(0)),
+                    binfo.actual_seqlen_q,
+                    AtomLayoutMS * 16,
+                    alibi_slope * params.scale_softmax,
+                    alibi_exp
+                );
+            }
+        }
 
         Tensor acc_dq = partition_fragment_C(tiled_mma_dq, Shape<Int<kBlockM>, Int<kHeadDim>>{});  // MMA, MMA_N, MMA_K
         tdQgdQaccum.data() = tdQgdQaccum.data() + (-int(kBlockM * params.h * params.d_rounded));
@@ -1139,6 +1171,44 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         gmem_tiled_copy_dKV, tdVrdV, tdVgdV, tdKVcdKV, tdKVpdKV, binfo.actual_seqlen_k - n_block * kBlockN
     );
 
+    if (Has_alibi) {
+        if (params.alibi_slopes_grad_ptr) {
+            for (int offset = 16; offset > 0; offset /= 2) {
+                alibi_slope_grad += __shfl_down_sync(0xFFFFFFFF, alibi_slope_grad, offset);
+            }
+            alibi_slope_grad *= params.rp_dropout;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                reinterpret_cast<float *>(smem_)[0] = 0.0f;
+            }
+            __syncthreads();
+            if (threadIdx.x % 32 == 0) {
+                atomicAdd(reinterpret_cast<float *>(smem_) + 0, alibi_slope_grad);
+            }
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                atomicAdd(reinterpret_cast<float *>(params.alibi_slopes_grad_ptr) + bidb * params.alibi_slopes_batch_stride + bidh, reinterpret_cast<float *>(smem_)[0]);
+            }
+        }
+        if (params.alibi_exps_grad_ptr) {
+            for (int offset = 16; offset > 0; offset /= 2) {
+                alibi_exp_grad += __shfl_down_sync(0xFFFFFFFF, alibi_exp_grad, offset);
+            }
+            alibi_exp_grad *= params.rp_dropout;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                reinterpret_cast<float *>(smem_)[1] = 0.0f;
+            }
+            __syncthreads();
+            if (threadIdx.x % 32 == 0) {
+                atomicAdd(reinterpret_cast<float *>(smem_) + 1, alibi_exp_grad);
+            }
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                atomicAdd(reinterpret_cast<float *>(params.alibi_exps_grad_ptr) + bidb * params.alibi_exps_batch_stride + bidh, reinterpret_cast<float *>(smem_)[1]);
+            }
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1403,6 +1473,9 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
     clear(acc_dq);
 
     float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    float alibi_exp = !Has_alibi || !params.alibi_exps_ptr ? 1.0f : reinterpret_cast<float *>(params.alibi_exps_ptr)[bidb * params.alibi_exps_batch_stride + bidh];
+    float alibi_slope_grad = 0.0f;
+    float alibi_exp_grad = 0.0f;
 
     for (; n_block >= 0; --n_block) {
         Tensor acc_s = partition_fragment_C(tiled_mma_sdp, Shape<Int<kBlockM>, Int<kBlockN>>{});  // (MMA=4, MMA_M_SdP, MMA_N)
@@ -1425,7 +1498,7 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
                 binfo.actual_seqlen_q, 
                 AtomLayoutMS * 16,
                 alibi_slope,
-                params.alibi_exp
+                alibi_exp
             );
         }
 
@@ -1483,6 +1556,35 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
             #pragma unroll
             for (int ni = 0; ni < size<1>(dS); ++ni) {
                 dS(mi, ni) = pointwise_mult(scores(mi, ni), dS(mi, ni), dP_sum(mi));
+            }
+        }
+
+        if (Has_alibi) {
+            if (params.alibi_slopes_grad_ptr) {
+                flash::apply_alibi_slope_grad<Is_causal>(
+                    alibi_slope_grad,
+                    dS,
+                    n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                    binfo.actual_seqlen_k,
+                    m_block * kBlockM + get<0>(taccScS_row(0)),
+                    binfo.actual_seqlen_q,
+                    AtomLayoutMS * 16,
+                    alibi_slope * params.scale_softmax,
+                    alibi_exp
+                );
+            }
+            if (params.alibi_exps_grad_ptr) {
+                flash::apply_alibi_exp_grad<Is_causal>(
+                    alibi_exp_grad,
+                    dS,
+                    n_block * kBlockN + (tidx / 32 / AtomLayoutMS) * MMA_N_SdP * 16,
+                    binfo.actual_seqlen_k,
+                    m_block * kBlockM + get<0>(taccScS_row(0)),
+                    binfo.actual_seqlen_q,
+                    AtomLayoutMS * 16,
+                    alibi_slope * params.scale_softmax,
+                    alibi_exp
+                );
             }
         }
 
@@ -1578,6 +1680,45 @@ inline __device__ void compute_dq_dk_dv_1rowblock(const Params &params, const in
     flash::copy</*Is_even_MN=*/false, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
         gmem_tiled_copy_dQ, tdQrdQ, tdQgdQ, tdQcdQ, tdQpdQ, binfo.actual_seqlen_q - m_block * kBlockM
     );
+
+    if (Has_alibi) {
+        if (params.alibi_slopes_grad_ptr) {
+            for (int offset = 16; offset > 0; offset /= 2) {
+                alibi_slope_grad += __shfl_down_sync(0xFFFFFFFF, alibi_slope_grad, offset);
+            }
+            alibi_slope_grad *= params.rp_dropout;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                reinterpret_cast<float *>(smem_)[0] = 0.0f;
+            }
+            __syncthreads();
+            if (threadIdx.x % 32 == 0) {
+                atomicAdd(reinterpret_cast<float *>(smem_) + 0, alibi_slope_grad);
+            }
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                atomicAdd(reinterpret_cast<float *>(params.alibi_slopes_grad_ptr) + bidb * params.alibi_slopes_batch_stride + bidh, reinterpret_cast<float *>(smem_)[0]);
+            }
+        }
+        if (params.alibi_exps_grad_ptr) {
+            for (int offset = 16; offset > 0; offset /= 2) {
+                alibi_exp_grad += __shfl_down_sync(0xFFFFFFFF, alibi_exp_grad, offset);
+            }
+            alibi_exp_grad *= params.rp_dropout;
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                reinterpret_cast<float *>(smem_)[1] = 0.0f;
+            }
+            __syncthreads();
+            if (threadIdx.x % 32 == 0) {
+                atomicAdd(reinterpret_cast<float *>(smem_) + 1, alibi_exp_grad);
+            }
+            __syncthreads();
+            if (threadIdx.x == 0) {
+                atomicAdd(reinterpret_cast<float *>(params.alibi_exps_grad_ptr) + bidb * params.alibi_exps_batch_stride + bidh, reinterpret_cast<float *>(smem_)[1]);
+            }
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

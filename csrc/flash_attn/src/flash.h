@@ -140,7 +140,8 @@ struct Flash_fwd_params : public Qkv_params {
 
     void * __restrict__ alibi_slopes_ptr;
     index_t alibi_slopes_batch_stride;
-    float alibi_exp;
+    void * __restrict__ alibi_exps_ptr;
+    index_t alibi_exps_batch_stride;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -183,6 +184,9 @@ struct Flash_bwd_params : public Flash_fwd_params {
 
     bool deterministic;
     index_t dq_accum_split_stride;
+
+    void *__restrict__ alibi_slopes_grad_ptr;
+    void *__restrict__ alibi_exps_grad_ptr;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

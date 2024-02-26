@@ -51,9 +51,9 @@ def test_flash_attention():
     cache_seqlens = torch.full((b,), s, dtype=torch.int32)
 
     alibi_slopes = torch.rand(h_q, dtype=torch.float32)
-    alibi_exp = 0.5
-    alibi_mask = -(torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :].float().abs().pow(alibi_exp)
-    alibi_mask = alibi_mask * alibi_slopes[None, :, None, None]
+    alibi_exps = torch.rand(h_q, dtype=torch.float32)
+    alibi_mask = (torch.arange(s)[None, :] - torch.arange(s_q)[:, None] - (s - s_q))[None, None, :, :].float().abs()
+    alibi_mask = -alibi_mask.pow(alibi_exps[None, :, None, None]) * alibi_slopes[None, :, None, None]
     causal_mask = ~torch.ones(s_q, s, dtype=torch.bool).tril(diagonal=s-s_q)
     mask = alibi_mask.masked_fill(causal_mask, torch.finfo(torch.float32).min)
 
@@ -61,8 +61,8 @@ def test_flash_attention():
     for _ in range(100):
         torch.ones(1 << 20)
 
-    def blocked_flash(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes, alibi_exp=alibi_exp)
-    def flash(): return flash_attn_func(q, k, v, causal=True, alibi_slopes=alibi_slopes, alibi_exp=alibi_exp)
+    def blocked_flash(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True, alibi_slopes=alibi_slopes, alibi_exps=alibi_exps)
+    def flash(): return flash_attn_func(q, k, v, causal=True, alibi_slopes=alibi_slopes, alibi_exps=alibi_exps)
     def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2), full_k.transpose(1, 2), full_v.transpose(1, 2), attn_mask=mask.to(dtype)).transpose(1, 2)
     def ref(): return scaled_dot_product_attention(q.transpose(1, 2).double(), full_k.transpose(1, 2).double(), full_v.transpose(1, 2).double(), attn_mask=mask.double()).transpose(1, 2)
 

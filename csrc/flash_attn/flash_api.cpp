@@ -257,7 +257,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
         c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-        const float alibi_exp,
+        c10::optional<at::Tensor> &alibi_exps_,
         const float p_dropout,
         const float softmax_scale,
         bool is_causal,
@@ -426,9 +426,19 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.sizes() == torch::IntArrayRef({num_heads}) || alibi_exps.sizes() == torch::IntArrayRef({batch_size, num_heads}));
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     if (seqlen_k > 0) {
@@ -464,7 +474,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                const at::Tensor &cu_seqlens_k,  // b+1
                c10::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
                c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
-               const float alibi_exp,
+               c10::optional<at::Tensor> &alibi_exps_,
                const int max_seqlen_q,
                const int max_seqlen_k,
                const float p_dropout,
@@ -626,9 +636,19 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.sizes() == torch::IntArrayRef({num_heads}) || alibi_exps.sizes() == torch::IntArrayRef({batch_size, num_heads}));
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     if (max_seqlen_k > 0) {
@@ -678,7 +698,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         c10::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-        const float alibi_exp,
+        c10::optional<at::Tensor> &alibi_exps_,
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
@@ -868,6 +888,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         params.rng_state[1] = std::get<1>(seeds);
     }
 
+    at::Tensor alibi_slopes_grad;
     if (alibi_slopes_.has_value()) {
         auto alibi_slopes = alibi_slopes_.value();
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
@@ -876,9 +897,28 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
+        if (alibi_slopes.requires_grad()) {
+            alibi_slopes_grad = torch::zeros_like(alibi_slopes);
+            params.alibi_slopes_grad_ptr = alibi_slopes_grad.data_ptr();
+        }
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    at::Tensor alibi_exps_grad;
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.sizes() == torch::IntArrayRef({num_heads}) || alibi_exps.sizes() == torch::IntArrayRef({batch_size, num_heads}));
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+        if (alibi_exps.requires_grad()) {
+            alibi_exps_grad = torch::zeros_like(alibi_exps);
+            params.alibi_exps_grad_ptr = alibi_exps_grad.data_ptr();
+        }
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     if (seqlen_q > 0) {
@@ -901,7 +941,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     }
 
-    return { dq, dk, dv, softmax_d };
+    return { dq, dk, dv, softmax_d, alibi_slopes_grad, alibi_exps_grad };
 }
 
 std::vector<at::Tensor>
@@ -917,7 +957,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor &cu_seqlens_q,  // b+1
                const at::Tensor &cu_seqlens_k,  // b+1
                c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
-               const float alibi_exp,
+               c10::optional<at::Tensor> &alibi_exps_,
                const int max_seqlen_q,
                const int max_seqlen_k,          // max sequence length to choose the kernel
                const float p_dropout,         // probability to drop
@@ -1126,6 +1166,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         params.rng_state[1] = std::get<1>(seeds);
     }
 
+    at::Tensor alibi_slopes_grad;
     if (alibi_slopes_.has_value()) {
         auto alibi_slopes = alibi_slopes_.value();
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
@@ -1134,9 +1175,28 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
+        if (alibi_slopes.requires_grad()) {
+            alibi_slopes_grad = torch::zeros_like(alibi_slopes);
+            params.alibi_slopes_grad_ptr = alibi_slopes_grad.data_ptr();
+        }
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    at::Tensor alibi_exps_grad;
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.sizes() == torch::IntArrayRef({num_heads}) || alibi_exps.sizes() == torch::IntArrayRef({batch_size, num_heads}));
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+        if (alibi_exps.requires_grad()) {
+            alibi_exps_grad = torch::zeros_like(alibi_exps);
+            params.alibi_exps_grad_ptr = alibi_exps_grad.data_ptr();
+        }
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     if (max_seqlen_q > 0) {
@@ -1159,7 +1219,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     }
 
-    return { dq, dk, dv, softmax_d };
+    return { dq, dk, dv, softmax_d, alibi_slopes_grad, alibi_exps_grad };
 }
 
 std::vector<at::Tensor>
@@ -1173,7 +1233,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
                 c10::optional<const at::Tensor> &rotary_sin_, // seqlen_ro x (rotary_dim / 2)
                 c10::optional<const at::Tensor> &cache_batch_idx_, // indices to index into the KV cache
                 c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-                const float alibi_exp,
+                c10::optional<at::Tensor> &alibi_exps_,
                 c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
                 const float softmax_scale,
                 bool is_causal,
@@ -1398,9 +1458,19 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({num_heads}) || alibi_slopes.sizes() == torch::IntArrayRef({batch_size, num_heads}));
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.sizes() == torch::IntArrayRef({num_heads}) || alibi_exps.sizes() == torch::IntArrayRef({batch_size, num_heads}));
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -1436,7 +1506,7 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
                         c10::optional<const at::Tensor> &rotary_cos_, // seqlen_ro x (rotary_dim / 2)
                         c10::optional<const at::Tensor> &rotary_sin_, // seqlen_ro x (rotary_dim / 2)
                         c10::optional<at::Tensor> &alibi_slopes_,     // batch_size x num_heads
-                        const float alibi_exp,
+                        c10::optional<at::Tensor> &alibi_exps_,
                         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
                         const float softmax_scale,
                         bool is_causal,
@@ -1631,18 +1701,28 @@ mha_fwd_blocked_kvcache(at::Tensor &q,                 // batch_size x seqlen_q 
         params.oaccum_ptr = out_accum.data_ptr();
     }
 
+    params.seqlenq_ngroups_swapped = seqlenq_ngroups_swapped;
     if (alibi_slopes_.has_value()) {
         auto alibi_slopes = alibi_slopes_.value();
         TORCH_CHECK(alibi_slopes.dtype() == torch::kFloat32, "ALiBi slopes must have dtype fp32");
         CHECK_DEVICE(alibi_slopes);
         TORCH_CHECK(alibi_slopes.stride(-1) == 1, "ALiBi slopes tensor must have contiguous last dimension");
-        params.seqlenq_ngroups_swapped = seqlenq_ngroups_swapped;
         TORCH_CHECK(alibi_slopes.size(-1) == !seqlenq_ngroups_swapped ? num_heads : num_heads_k * seqlen_q);
         params.alibi_slopes_ptr = alibi_slopes.data_ptr();
         params.alibi_slopes_batch_stride = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
-        params.alibi_exp = alibi_exp;
     } else {
         params.alibi_slopes_ptr = nullptr;
+    }
+    if (alibi_exps_.has_value()) {
+        auto alibi_exps = alibi_exps_.value();
+        TORCH_CHECK(alibi_exps.dtype() == torch::kFloat32, "ALiBi exp must have dtype fp32");
+        CHECK_DEVICE(alibi_exps);
+        TORCH_CHECK(alibi_exps.stride(-1) == 1, "ALiBi exp tensor must have contiguous last dimension");
+        TORCH_CHECK(alibi_exps.size(-1) == !seqlenq_ngroups_swapped ? num_heads : num_heads_k * seqlen_q);
+        params.alibi_exps_ptr = alibi_exps.data_ptr();
+        params.alibi_exps_batch_stride = alibi_exps.dim() == 2 ? alibi_exps.stride(0) : 0;
+    } else {
+        params.alibi_exps_ptr = nullptr;
     }
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();

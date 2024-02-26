@@ -323,6 +323,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     clear(acc_o);
 
     float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    float alibi_exp = !Has_alibi || !params.alibi_exps_ptr ? 1.0f : reinterpret_cast<float *>(params.alibi_exps_ptr)[bidb * params.alibi_exps_batch_stride + bidh];
 
     // For performance reason, we separate out two kinds of iterations:
     // those that need masking on S, and those that don't.
@@ -376,7 +377,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 alibi_slope,
-                params.alibi_exp
+                alibi_exp
             );
         }
 
@@ -494,7 +495,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 alibi_slope,
-                params.alibi_exp
+                alibi_exp
             );
         }
         
@@ -950,7 +951,8 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     clear(acc_o);
 
-    float alibi_slope[/* MMA_N */kBlockM / (kNWarps * 16)][2] = {0};
+    float alibi_slope[/* MMA_N */kBlockM / (kNWarps * 16)][2] = {0.0f};
+    float alibi_exp[/* MMA_N */kBlockM / (kNWarps * 16)][2] = {1.0f};
     if (Has_alibi) {
         const int row_idx_offset = m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4;
         const int warp_row_stride = kNWarps * 16;
@@ -962,8 +964,14 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 if (row_idx < params.seqlen_q) {
                     if (!params.seqlenq_ngroups_swapped) {
                         alibi_slope[mi][i] = reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+                        if (params.alibi_exps_ptr) {
+                            alibi_exp[mi][i] = reinterpret_cast<float *>(params.alibi_exps_ptr)[bidb * params.alibi_exps_batch_stride + bidh];
+                        }
                     } else {
                         alibi_slope[mi][i] = reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh * params.seqlen_q + row_idx] / params.scale_softmax;
+                        if (params.alibi_exps_ptr) {
+                            alibi_exp[mi][i] = reinterpret_cast<float *>(params.alibi_exps_ptr)[bidb * params.alibi_exps_batch_stride + bidh * params.seqlen_q + row_idx];
+                        }
                     }
                 }
             }
@@ -1022,7 +1030,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 alibi_slope,
-                params.alibi_exp,
+                alibi_exp,
                 params.seqlenq_ngroups_swapped
             );
         }
@@ -1128,7 +1136,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 binfo.actual_seqlen_q, 
                 kNWarps * 16,
                 alibi_slope,
-                params.alibi_exp,
+                alibi_exp,
                 params.seqlenq_ngroups_swapped
             );
         }
