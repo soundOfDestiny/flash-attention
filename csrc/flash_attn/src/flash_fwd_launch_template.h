@@ -350,3 +350,19 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
         });
     });
 }
+
+template<typename T>
+void run_mha_fwd_hdim512(Flash_fwd_params &params, cudaStream_t stream) {
+    constexpr static int Headdim = 512;
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    bool is_sm8x = dprops->major == 8 && dprops->minor > 0;
+    BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
+        BOOL_SWITCH(params.is_causal, Is_causal, [&] {
+            if (is_sm8x) {
+                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 64, 32, 4, true, true, T>, Is_dropout, Is_causal>(params, stream);
+            } else {
+                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 32, 8, false, false, T>, Is_dropout, Is_causal>(params, stream);
+            }
+        });
+    });
+}

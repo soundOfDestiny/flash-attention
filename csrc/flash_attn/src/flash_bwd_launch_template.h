@@ -354,3 +354,17 @@ void run_mha_bwd_hdim256(Flash_bwd_params &params, cudaStream_t stream, const bo
         }
     });
 }
+
+template<typename T>
+void run_mha_bwd_hdim512(Flash_bwd_params &params, cudaStream_t stream, const bool configure) {
+    constexpr static int Headdim = 512;
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    bool is_sm8x = dprops->major == 8 && dprops->minor > 0;
+    if (is_sm8x) {
+        assert(false && "Head dim 512 is not supported on A100.");
+    }
+    if (params.p_dropout < 1.f) {
+        assert(false && "Dropout is not supported for head dim 512.");
+    }
+    run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 32, 64, 8, 2, 2, 1, false, true, T>, false>(params, stream, configure);  // H100
+}

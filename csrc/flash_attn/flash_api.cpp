@@ -200,7 +200,7 @@ void set_params_dgrad(Flash_bwd_params &params,
 void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel=false) {
     FP16_SWITCH(!params.is_bf16, [&] {
         FWD_HEADDIM_SWITCH(params.d, [&] {
-            if (kHeadDim <= 256 && params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
+            if (params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
                 run_mha_fwd_<elem_type, kHeadDim>(params, stream);
             } else {
                 run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim>(params, stream);
@@ -298,7 +298,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be postive");
-    TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+    TORCH_CHECK(head_size_og <= 512, "FlashAttention forward only supports head dimension at most 512");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     if (window_size_left >= seqlen_k) { window_size_left = -1; }
@@ -525,7 +525,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     const int total_k = k.size(0);
     const int num_heads_k = k.size(1);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
-    TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+    TORCH_CHECK(head_size_og <= 512, "FlashAttention forward only supports head dimension at most 512");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
@@ -683,6 +683,8 @@ void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream, const bool confi
           run_mha_bwd_<elem_type, 224>(params, stream, configure);
         } else if (params.d <= 256) {
           run_mha_bwd_<elem_type, 256>(params, stream, configure);
+        } else if (params.d <= 512) {
+          run_mha_bwd_<elem_type, 512>(params, stream, configure);
         }
     });
 }
@@ -752,7 +754,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     const int num_heads_k = k.size(2);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
-    TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+    TORCH_CHECK(head_size <= 512, "FlashAttention backward only supports head dimension at most 512");
     if (head_size > 192) {
         TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
     }
@@ -1020,7 +1022,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     const int num_heads_k = k.size(1);
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
-    TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+    TORCH_CHECK(head_size <= 512, "FlashAttention backward only supports head dimension at most 512");
     if (head_size > 192) {
         TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
     }
@@ -1280,7 +1282,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
     const int num_heads_k = kcache.size(2);
     const int batch_size_c = kcache.size(0);
     TORCH_CHECK(batch_size > 0, "batch size must be postive");
-    TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+    TORCH_CHECK(head_size_og <= 512, "FlashAttention forward only supports head dimension at most 512");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
     // causal=true is the same as causal=false in this case
