@@ -40,7 +40,7 @@ BASE_WHEEL_URL = (
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
-FORCE_BUILD = os.getenv("FLASH_ATTENTION_FORCE_BUILD", "FALSE") == "TRUE"
+FORCE_BUILD = "TRUE"
 SKIP_CUDA_BUILD = os.getenv("FLASH_ATTENTION_SKIP_CUDA_BUILD", "FALSE") == "TRUE"
 # For CI, we want the option to build with C++11 ABI since the nvcr images use C++11 ABI
 FORCE_CXX11_ABI = os.getenv("FLASH_ATTENTION_FORCE_CXX11_ABI", "FALSE") == "TRUE"
@@ -106,16 +106,17 @@ if not SKIP_CUDA_BUILD:
     if os.path.exists(os.path.join(torch_dir, "include", "ATen", "CUDAGeneratorImpl.h")):
         generator_flag = ["-DOLD_GENERATOR_PATH"]
 
+    fast_build_flag = [
+        "-DFLASHATTENTION_DISABLE_DROPOUT",
+        "-DFLASHATTENTION_DISABLE_UNEVEN_K",
+        "-DFLASHATTENTION_DISABLE_LOCAL",
+    ]
+
     check_if_cuda_home_none("flash_attn")
     # Check, if CUDA11 is installed for compute capability 8.0
     cc_flag = []
     if CUDA_HOME is not None:
         _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
-        if bare_metal_version < Version("11.6"):
-            raise RuntimeError(
-                "FlashAttention is only supported on CUDA 11.6 and above.  "
-                "Note: make sure nvcc has a supported version by running nvcc -V."
-            )
     # cc_flag.append("-gencode")
     # cc_flag.append("arch=compute_75,code=sm_75")
     cc_flag.append("-gencode")
@@ -183,9 +184,11 @@ if not SKIP_CUDA_BUILD:
                 "csrc/flash_attn/src/flash_fwd_split_hdim224_bf16_sm80.cu",
                 "csrc/flash_attn/src/flash_fwd_split_hdim256_fp16_sm80.cu",
                 "csrc/flash_attn/src/flash_fwd_split_hdim256_bf16_sm80.cu",
+                "csrc/flash_attn/src/flash_fwd_split_hdim512_fp16_sm80.cu",
+                "csrc/flash_attn/src/flash_fwd_split_hdim512_bf16_sm80.cu",
             ],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"] + generator_flag,
+                "cxx": ["-O3", "-std=c++17"] + generator_flag + fast_build_flag,
                 "nvcc": append_nvcc_threads(
                     [
                         "-O3",
@@ -203,6 +206,7 @@ if not SKIP_CUDA_BUILD:
                     ]
                     + generator_flag
                     + cc_flag
+                    + fast_build_flag
                 ),
             },
             include_dirs=[

@@ -1,6 +1,6 @@
 # Copyright (c) 2023, Tri Dao.
 
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -1207,6 +1207,63 @@ def flash_attn_with_kvcache(
         block_table,
         alibi_slopes,
         None,
+        softmax_scale,
+        causal,
+        window_size[0],
+        window_size[1],
+        rotary_interleaved,
+        num_splits,
+    )
+    return out
+
+
+def get_kvcache_block_size(head_dim):
+    # This should match the block sizes in the CUDA kernel
+    if head_dim <= 64:
+        return 256
+    elif head_dim <= 128:
+        return 128
+    elif head_dim <= 256:
+        return 64
+    elif head_dim <= 512:
+        return 64
+    else:
+        raise ValueError(f"Unsupported head_dim: {head_dim}")
+
+
+def flash_attn_with_blocked_kvcache(
+    q: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    block_table: torch.Tensor,
+    cache_seqlens: torch.Tensor,
+    k: Optional[torch.Tensor] = None,
+    v: Optional[torch.Tensor] = None,
+    rotary_cos: Optional[torch.Tensor] = None,
+    rotary_sin: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    softmax_scale: Optional[float] = None,
+    causal: bool = False,
+    window_size: Tuple[int, int] = (-1, -1),  # -1 means infinite context window
+    rotary_interleaved: bool = True,
+    alibi_slopes: Optional[torch.Tensor] = None,
+    num_splits: int = 0,
+):
+    if softmax_scale is None:
+        softmax_scale = q.shape[-1] ** (-0.5)
+    out, softmax_lse = flash_attn_cuda.fwd_kvcache(
+        q,
+        k_cache,
+        v_cache,
+        k,
+        v,
+        cache_seqlens,
+        rotary_cos,
+        rotary_sin,
+        None,
+        block_table,
+        alibi_slopes,
+        out,
         softmax_scale,
         causal,
         window_size[0],
