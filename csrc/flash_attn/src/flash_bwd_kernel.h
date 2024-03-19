@@ -92,6 +92,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     constexpr int kBlockM = Kernel_traits::kBlockM;
     constexpr int kBlockN = Kernel_traits::kBlockN;
     constexpr int kHeadDim = Kernel_traits::kHeadDim;
+    constexpr int kHeadDimV = Kernel_traits::kHeadDimV;
     constexpr int MMA_N_SdP = kBlockN / decltype(typename Kernel_traits::TiledMmaSdP{}.template tile_size_mnk<1>())::value;
     constexpr int AtomLayoutMS = Kernel_traits::AtomLayoutMSdP;
     constexpr bool Double_buffer = !Kernel_traits::No_double_buffer;
@@ -132,13 +133,13 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                             Shape<Int<kBlockN>, Int<kHeadDim>>{},
                             make_stride(params.k_row_stride, _1{}));
     Tensor gV = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.v_ptr) + row_offset_v),
-                            Shape<Int<kBlockN>, Int<kHeadDim>>{},
+                            Shape<Int<kBlockN>, Int<kHeadDimV>>{},
                             make_stride(params.v_row_stride, _1{}));
     Tensor gdO = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.do_ptr) + row_offset_do),
-                             Shape<Int<kBlockM>, Int<kHeadDim>>{},
+                             Shape<Int<kBlockM>, Int<kHeadDimV>>{},
                              make_stride(params.do_row_stride, _1{}));
     Tensor gO = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.o_ptr) + row_offset_o),
-                            Shape<Int<kBlockM>, Int<kHeadDim>>{},
+                            Shape<Int<kBlockM>, Int<kHeadDimV>>{},
                             make_stride(params.o_row_stride, _1{}));
     Tensor gdQ = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.dq_ptr) + row_offset_dq),
                              Shape<Int<kBlockM>, Int<kHeadDim>>{},
@@ -152,16 +153,16 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                                 Shape<Int<kBlockM>>{}, Stride<_1>{});
 
     Tensor sQ = make_tensor(make_smem_ptr(reinterpret_cast<Element *>(smem_)),
-                            typename Kernel_traits::SmemLayoutQdO{});
-    Tensor sQt = make_tensor(sQ.data(), typename Kernel_traits::SmemLayoutQdOtransposed{});
-    Tensor sQtNoSwizzle = make_tensor(sQ.data(), typename Kernel_traits::SmemLayoutQdOtransposedNoSwizzle{});
+                            typename Kernel_traits::SmemLayoutQ{});
+    Tensor sQt = make_tensor(sQ.data(), typename Kernel_traits::SmemLayoutQtransposed{});
+    Tensor sQtNoSwizzle = make_tensor(sQ.data(), typename Kernel_traits::SmemLayoutQtransposedNoSwizzle{});
     // Double buffer for sQ
-    Tensor sdO = make_tensor(sQ.data() + (Double_buffer ? 2 : 1) * size(sQ), typename Kernel_traits::SmemLayoutQdO{});
-    Tensor sdOt = make_tensor(sdO.data(), typename Kernel_traits::SmemLayoutQdOtransposed{});
+    Tensor sdO = make_tensor(sQ.data() + (Double_buffer ? 2 : 1) * size(sQ), typename Kernel_traits::SmemLayoutdO{});
+    Tensor sdOt = make_tensor(sdO.data(), typename Kernel_traits::SmemLayoutdOtransposed{});
     Tensor sdOtransposedNoSwizzle = make_tensor(sdO.data(),
-                                                typename Kernel_traits::SmemLayoutQdOtransposedNoSwizzle{});
-    Tensor sK = make_tensor(sdO.data() + size(sdO), typename Kernel_traits::SmemLayoutKV{});
-    Tensor sV = make_tensor(sK.data() + size(sK), typename Kernel_traits::SmemLayoutKV{});
+                                                typename Kernel_traits::SmemLayoutdOtransposedNoSwizzle{});
+    Tensor sK = make_tensor(sdO.data() + size(sdO), typename Kernel_traits::SmemLayoutK{});
+    Tensor sV = make_tensor(sK.data() + size(sK), typename Kernel_traits::SmemLayoutV{});
     Tensor sKt = make_tensor(sK.data(), typename Kernel_traits::SmemLayoutKtransposed{});
     Tensor sKtNoSwizzle = make_tensor(sK.data(), typename Kernel_traits::SmemLayoutKtransposedNoSwizzle{});
     Tensor sdS = make_tensor(!Kernel_traits::Is_V_in_regs ? sV.data() + size(sV) : sK.data() + size(sK),
@@ -231,7 +232,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor tdQrKt = thr_mma_dq.partition_fragment_B(sKtNoSwizzle);    // (MMA, MMA_K, MMA_N)
 
     Tensor acc_dk = partition_fragment_C(tiled_mma_dkv, Shape<Int<kBlockN>, Int<kHeadDim>>{});  // MMA, MMA_N, MMA_K
-    Tensor acc_dv = partition_fragment_C(tiled_mma_dkv, Shape<Int<kBlockN>, Int<kHeadDim>>{});  // MMA, MMA_N, MMA_K
+    Tensor acc_dv = partition_fragment_C(tiled_mma_dkv, Shape<Int<kBlockN>, Int<kHeadDimV>>{});  // MMA, MMA_N, MMA_K
 
     //
     // Copy Atom retiling
@@ -337,7 +338,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                                  Shape<Int<kBlockN>, Int<kHeadDim>>{},
                                  make_stride(params.dk_row_stride, _1{}));
         Tensor gdV = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.dv_ptr) + row_offset_dv),
-                                 Shape<Int<kBlockN>, Int<kHeadDim>>{},
+                                 Shape<Int<kBlockN>, Int<kHeadDimV>>{},
                                  make_stride(params.dv_row_stride, _1{}));
         typename Kernel_traits::GmemTiledCopydKV gmem_tiled_copy_dKV;
         auto gmem_thr_copy_dKV = gmem_tiled_copy_dKV.get_thread_slice(tidx);
@@ -721,8 +722,8 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     Tensor rdK = flash::convert_type<Element>(acc_dk);
     Tensor rdV = flash::convert_type<Element>(acc_dv);
 
-    Tensor sdK = make_tensor(sK.data(), typename Kernel_traits::SmemLayoutdKV{});  // (SMEM_N, SMEM_K)
-    Tensor sdV = make_tensor(sdK.data() + size(sdK), typename Kernel_traits::SmemLayoutdKV{}); // (SMEM_N, SMEM_K)
+    Tensor sdK = make_tensor(sK.data(), typename Kernel_traits::SmemLayoutdK{});  // (SMEM_N, SMEM_K)
+    Tensor sdV = make_tensor(sdK.data() + size(sdK), typename Kernel_traits::SmemLayoutdV{}); // (SMEM_N, SMEM_K)
 
     // Partition sdV and sdK to match the accumulator partitioning
     auto smem_tiled_copy_dKV = make_tiled_copy_C(typename Kernel_traits::SmemCopyAtomdKV{}, tiled_mma_dkv);
@@ -749,7 +750,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
                              Shape<Int<kBlockN>, Int<kHeadDim>>{},
                              make_stride(params.dk_row_stride, _1{}));
     Tensor gdV = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.dv_ptr) + row_offset_dv),
-                             Shape<Int<kBlockN>, Int<kHeadDim>>{},
+                             Shape<Int<kBlockN>, Int<kHeadDimV>>{},
                              make_stride(params.dv_row_stride, _1{}));
 
     typename Kernel_traits::GmemTiledCopydKV gmem_tiled_copy_dKV;

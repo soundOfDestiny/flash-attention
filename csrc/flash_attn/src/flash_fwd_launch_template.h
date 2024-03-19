@@ -303,12 +303,13 @@ void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T>
 void run_mha_fwd_hdim192(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 192;
+    HEADDIMV_SWITCH(params.d_v, [&] {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {
             if constexpr(!Is_dropout) {
-                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 64, 8, false, false, T>, Is_dropout, Is_causal>(params, stream);
+                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 64, 8, false, false, T, kHeadDimV>, Is_dropout, Is_causal>(params, stream);
             } else {
-                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 64, 64, 4, false, false, T>, Is_dropout, Is_causal>(params, stream);
+                run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 64, 64, 4, false, false, T, kHeadDimV>, Is_dropout, Is_causal>(params, stream);
             }
             // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 64, 32, 4, false, false, T>, Is_dropout, Is_causal>(params, stream);
             // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 32, 8, false, false, T>, Is_dropout, Is_causal>(params, stream);
@@ -316,6 +317,7 @@ void run_mha_fwd_hdim192(Flash_fwd_params &params, cudaStream_t stream) {
             // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 64, 128, 4, false, T>>(params, stream);
             // run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 128, 8, false, T>>(params, stream);
         });
+    });
     });
 }
 

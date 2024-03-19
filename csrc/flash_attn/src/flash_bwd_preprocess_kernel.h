@@ -69,6 +69,7 @@ inline __device__ void compute_dot_do_o(const Params &params) {
 
     constexpr int kBlockM = Kernel_traits::kBlockM;
     constexpr int kHeadDim = Kernel_traits::kHeadDim;
+    constexpr int kHeadDimV = Kernel_traits::kHeadDimV;
 
     const BlockInfo binfo(params, bidb);
     if (m_block * kBlockM >= binfo.actual_seqlen_q) return;
@@ -82,10 +83,10 @@ inline __device__ void compute_dot_do_o(const Params &params) {
     const index_t row_offset_dpsum = (bidb * params.h + bidh) * params.seqlen_q_rounded + m_block * kBlockM;
 
     Tensor gdO = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.do_ptr) + row_offset_do),
-                             Shape<Int<kBlockM>, Int<kHeadDim>>{},
+                             Shape<Int<kBlockM>, Int<kHeadDimV>>{},
                              make_stride(params.do_row_stride, _1{}));
     Tensor gO = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.o_ptr) + row_offset_o),
-                            Shape<Int<kBlockM>, Int<kHeadDim>>{},
+                            Shape<Int<kBlockM>, Int<kHeadDimV>>{},
                             make_stride(params.o_row_stride, _1{}));
     Tensor gdQaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.dq_accum_ptr) + row_offset_dq_accum),
                                   Shape<Int<kBlockM>, Int<kHeadDim>>{},
@@ -104,7 +105,7 @@ inline __device__ void compute_dot_do_o(const Params &params) {
     Tensor tdOgO = gmem_thr_copy_dO.partition_S(gO);
     Tensor tdQgdQaccum = gmem_thr_copy_dQaccum.partition_D(gdQaccum);
 
-    Tensor cdO = make_identity_tensor(Shape<Int<kBlockM>, Int<kHeadDim>>{});    // (BLK_M,BLK_K) -> (blk_m,blk_k)
+    Tensor cdO = make_identity_tensor(Shape<Int<kBlockM>, Int<kHeadDimV>>{});    // (BLK_M,BLK_K) -> (blk_m,blk_k)
     Tensor tdOcdO = gmem_thr_copy_dO.partition_S(cdO);
 
     // Allocate predicate tensors for k
