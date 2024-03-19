@@ -1228,7 +1228,7 @@ def get_kvcache_block_size(head_dim):
     elif head_dim <= 256:
         return 64
     elif head_dim <= 512:
-        return 64
+        return 32
     else:
         raise ValueError(f"Unsupported head_dim: {head_dim}")
 
