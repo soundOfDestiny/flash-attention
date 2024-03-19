@@ -108,3 +108,20 @@
       return __VA_ARGS__();                \
     }                                      \
   }()
+
+#define HEADDIMV_SWITCH(HEADDIM, ...)   \
+  [&] {                                    \
+    if (HEADDIM == 0) {                    \
+      constexpr static int kHeadDimV = 0;  \
+      return __VA_ARGS__();                \
+    } else if (HEADDIM == 64) {            \
+      constexpr static int kHeadDimV = 64; \
+      return __VA_ARGS__();                \
+    } else if (HEADDIM == 128) {           \
+      constexpr static int kHeadDimV = 128;\
+      return __VA_ARGS__();                \
+    } else{                                \
+      assert(                              \
+        false and "Unsupported HeadDimV"); \
+    }                                      \
+  }()
