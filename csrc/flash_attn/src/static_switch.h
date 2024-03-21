@@ -103,9 +103,15 @@
     } else if (HEADDIM <= 256) {           \
       constexpr static int kHeadDim = 256; \
       return __VA_ARGS__();                \
-    } else if (HEADDIM <= 512) {           \
+    } else if (HEADDIM == 512) {           \
       constexpr static int kHeadDim = 512; \
       return __VA_ARGS__();                \
+    } else if (HEADDIM == 576) {           \
+      constexpr static int kHeadDim = 576; \
+      return __VA_ARGS__();                \
+    } else {                               \
+      assert(                              \
+        false and "Unsupported HeadDim");  \
     }                                      \
   }()
 
@@ -120,7 +126,21 @@
     } else if (HEADDIM == 128) {           \
       constexpr static int kHeadDimV = 128;\
       return __VA_ARGS__();                \
-    } else{                                \
+    } else {                               \
+      assert(                              \
+        false and "Unsupported HeadDimV"); \
+    }                                      \
+  }()
+
+#define HEADDIMV_INFER_SWITCH(HEADDIM, ...)\
+  [&] {                                    \
+    if (HEADDIM == 0) {                    \
+      constexpr static int kHeadDimV = 0;  \
+      return __VA_ARGS__();                \
+    } else if (HEADDIM == 512) {           \
+      constexpr static int kHeadDimV = 512;\
+      return __VA_ARGS__();                \
+    } else {                               \
       assert(                              \
         false and "Unsupported HeadDimV"); \
     }                                      \

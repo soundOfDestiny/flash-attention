@@ -162,17 +162,19 @@ void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream)
     // and for headdim 192 with block size 64 x 128.
     // Also for headdim 160 with block size 64 x 128 after the rotary addition.
     auto dprops = at::cuda::getCurrentDeviceProperties();
+    HEADDIMV_INFER_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
     if (dprops->major == 8 && dprops->minor == 0) {  // A100
         constexpr static int kBlockN = Headdim <= 64 ? 256 : (Headdim <= 128 ? 128 : (Headdim <= 256 ? 64 : 32));
         if (params.block_table != nullptr) assert(params.page_block_size == kBlockN);
-        run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T>>(params, stream);
+        run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T, kHeadDimV>>(params, stream);
     } else if (dprops->major == 9 && dprops->minor == 0) {  // H100
         constexpr static int kBlockN = Headdim <= 64 ? 256 : (Headdim <= 128 ? 128 : (Headdim <= 256 ? 64 : 32));
         if (params.block_table != nullptr) assert(params.page_block_size == kBlockN);
-        run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T>>(params, stream);
+        run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T, kHeadDimV>>(params, stream);
     } else {
         assert(false);
     }
+    });
 }
 
 template<typename T>
@@ -303,7 +305,7 @@ void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T>
 void run_mha_fwd_hdim192(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 192;
-    HEADDIMV_SWITCH(params.d_v, [&] {
+    HEADDIMV_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {
             if constexpr(!Is_dropout) {
