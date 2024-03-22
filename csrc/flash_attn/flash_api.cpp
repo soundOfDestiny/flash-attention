@@ -563,7 +563,7 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
     const int head_size_v = v.sizes()[2];
     TORCH_CHECK(head_size_v % 32 == 0, "head_size_v should be a multiple of 32");
     if (head_size_v != head_size_og) {
-        TORCH_CHECK(head_size_og == 192, "head_size_qk must be 192");
+        TORCH_CHECK(head_size_og == 128 || head_size_og == 192, "head_size_qk must be 192");
     }
     const int num_heads_k = paged_KV ? k.size(2) : k.size(1);
 
@@ -1050,7 +1050,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads x head_size_v
     const int head_size_v = v.sizes()[2];
     TORCH_CHECK(head_size_v % 32 == 0, "head_size_v should be a multiple of 32");
     if (head_size_v != head_size) {
-        TORCH_CHECK(head_size == 192, "head_size_qk must be 192");
+        TORCH_CHECK(head_size == 128 || head_size == 192, "head_size_qk must be 192");
     }
     const int total_k = k.size(0);
     const int num_heads_k = k.size(1);
@@ -1279,7 +1279,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
     const int head_size_v = vcache.sizes()[3];
     TORCH_CHECK(head_size_v % 32 == 0, "head_size_v should be a multiple of 32");
     if (head_size_v != head_size) {
-        TORCH_CHECK(head_size == 192 || head_size == 576, "head_size_qk must be 192 or 576");
+        TORCH_CHECK(head_size == 128 || head_size == 192 || head_size == 576, "head_size_qk must be 192 or 576");
     }
 
     const int max_num_blocks_per_seq = !paged_KV ? 0 : block_table.size(1);
