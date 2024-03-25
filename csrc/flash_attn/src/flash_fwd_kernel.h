@@ -736,7 +736,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 }
             }
             tKgKnew.data() = tKgKnew.data() + (-int(kBlockN * params.knew_row_stride));
-            if (block_table == nullptr) {
+            if (false) {
                 tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
                 tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
             } else {
@@ -834,7 +834,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         // Advance gV
         if (masking_step > 0) {
-            if (block_table == nullptr) {
+            if (false) {
                 tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
             } else {
                 const int block_table_idx_cur = (n_block + 1) * kBlockN / params.page_block_size;
@@ -869,7 +869,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         if (n_block > n_block_min) {
             // Advance gK
-            if (block_table == nullptr) {
+            if (false) {
                 tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
             } else {
                 const int block_table_idx_cur = n_block * kBlockN / params.page_block_size;
@@ -912,7 +912,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         flash::cp_async_wait<0>();
         __syncthreads();
         // Advance gV
-        if (block_table == nullptr) {
+        if (false) {
             tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
         } else {
             const int block_table_idx_cur = (n_block + 1) * kBlockN / params.page_block_size;
@@ -933,7 +933,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         __syncthreads();
         if (n_block > n_block_min) {
             // Advance gK
-            if (block_table == nullptr) {
+            if (false) {
                 tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
             } else {
                 const int block_table_idx_cur = n_block * kBlockN / params.page_block_size;
