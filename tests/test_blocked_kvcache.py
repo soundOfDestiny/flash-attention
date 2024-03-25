@@ -1,9 +1,8 @@
+import math
 import torch
-from torch.nn.functional import scaled_dot_product_attention
 from flash_attn.flash_attn_interface import get_kvcache_block_size, flash_attn_with_blocked_kvcache
 
-
-b, s, h_q, h_kv, d = 1, 131072, 56, 1, 576
+b, s, h_q, h_kv, d = 1, 131072, 64, 1, 576
 v_dim = 512
 block_size = get_kvcache_block_size(d)
 dtype = torch.bfloat16
@@ -41,10 +40,17 @@ def timer(func, name=""):
     en.record()
     torch.cuda.synchronize()
     t = st.elapsed_time(en) / e
+    FLOPS = b * s * h_q * d * 2 * 2
     bytes = b * s * h_kv * d * 2 * (torch.finfo(dtype).bits // 8)
 
-    print(f"{name}: {t} ms, {bytes / 10**6 / t} GB/s")
+    print(f"{t} ms, {FLOPS / 10 ** 9 / t} tflops, {bytes / 10 ** 6 / t} GB/s")
     return t
+
+
+def scaled_dot_product_attention(query, key, value) -> torch.Tensor:
+    attn_weight = query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+    return attn_weight @ value
 
 
 @torch.inference_mode()
