@@ -1265,6 +1265,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
 
     at::Tensor block_table;
     const bool paged_KV = block_table_.has_value();
+    assert(paged_KV && "Only support blocked kvcache");
     if (paged_KV) {
         TORCH_CHECK(!cache_batch_idx_.has_value(), "Paged KVcache does not support cache_batch_idx");
         block_table = block_table_.value();
