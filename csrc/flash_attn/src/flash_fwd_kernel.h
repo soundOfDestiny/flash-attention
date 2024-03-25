@@ -980,7 +980,6 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     Tensor taccOsOaccum = smem_thr_copy_Oaccum.partition_D(sOaccum);     // ((Atom,AtomNum),PIPE_M,PIPE_N)
 
     // sOaccum is larger than sQ, so we need to syncthreads here
-    // TODO: allocate enough smem for sOaccum
     if constexpr (Split) { __syncthreads(); }
 
     cute::copy(smem_tiled_copy_Oaccum, taccOrOaccum, taccOsOaccum);
