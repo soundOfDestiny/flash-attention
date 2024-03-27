@@ -293,7 +293,11 @@ void run_mha_bwd_hdim192(Flash_bwd_params &params, cudaStream_t stream) {
     HEADDIMV_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 136 * 1024) {
-            run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T, kHeadDimV>, Is_dropout>(params, stream);
+            if constexpr(kHeadDimV == 128){
+                run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 128, 8, 2, 4, 2, false, false, T, kHeadDimV>, Is_dropout>(params, stream);
+            } else {
+                run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T, kHeadDimV>, Is_dropout>(params, stream);
+            }
         } else {
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, true, true, T, kHeadDimV>, Is_dropout>(params, stream);
         }
