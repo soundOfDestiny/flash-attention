@@ -122,6 +122,17 @@ __forceinline__ __device__ void max_scale_exp2_sum(Tensor<Engine0, Layout0> &ten
     }
 }
 
+template<typename Tensor0, typename Tensor1>
+__forceinline__ __device__ void rescale_o(Tensor0 &acc_o, Tensor1 &scale_o) {
+    // Reshape acc_o from (MMA=4, MMA_M, MMA_K) to (nrow=(2, MMA_M), ncol=(2, MMA_K))
+    Tensor acc_o_rowcol = make_tensor(acc_o.data(), flash::convert_layout_acc_rowcol(acc_o.layout()));
+    #pragma unroll
+    for (int mi = 0; mi < size(scale_o); ++mi) {
+        #pragma unroll
+        for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scale_o(mi); }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <int kNRows>
@@ -133,10 +144,12 @@ struct Softmax {
     __forceinline__ __device__ Softmax() {};
 
     template<bool Is_first, bool Check_inf=false, typename Tensor0, typename Tensor1>
-    __forceinline__ __device__ void softmax_rescale_o(Tensor0 &acc_s, Tensor1 &acc_o, float softmax_scale_log2) {
+    __forceinline__ __device__ TensorT softmax_rescale_o(Tensor0 &acc_s, Tensor1 &acc_o, float softmax_scale_log2) {
         // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
         Tensor scores = make_tensor(acc_s.data(), flash::convert_layout_acc_rowcol(acc_s.layout()));
         static_assert(decltype(size<0>(scores))::value == kNRows);
+        TensorT scale_o;
+        clear(scale_o);
         if (Is_first) {
             flash::template reduce_max</*zero_init=*/true>(scores, row_max);
             flash::scale_apply_exp2(scores, row_max, softmax_scale_log2);
@@ -154,6 +167,7 @@ struct Softmax {
                     ? row_max(mi)
                     : (row_max(mi) == -INFINITY ? 0.0f : row_max(mi));
                 float scores_scale = exp2f((scores_max_prev(mi) - scores_max_cur) * softmax_scale_log2);
+                scale_o(mi) = scores_scale;
                 row_sum(mi) *= scores_scale;
                 #pragma unroll
                 for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scores_scale; }
@@ -163,6 +177,7 @@ struct Softmax {
             // We do that reduce at the end when we need to normalize the softmax.
             flash::reduce_sum</*zero_init=*/false>(scores, row_sum);
         }
+        return scale_o;
     };
 
     template<bool Is_dropout=false, bool Split=false, typename Tensor0>
