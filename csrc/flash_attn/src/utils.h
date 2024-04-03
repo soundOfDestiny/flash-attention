@@ -4,6 +4,10 @@
 
 #pragma once
 
+#ifdef __CLION_IDE__
+#define __CUDA_ARCH__ 900 // NOLINT(*-reserved-identifier)
+#endif
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>

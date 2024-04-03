@@ -4,6 +4,10 @@
 
 #pragma once
 
+#ifdef __CLION_IDE__
+#define __CUDA_ARCH__ 900 // NOLINT(*-reserved-identifier)
+#endif
+
 #include "cute/algorithm/copy.hpp"
 
 #include "cutlass/cutlass.h"
