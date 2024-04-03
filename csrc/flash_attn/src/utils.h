@@ -164,7 +164,7 @@ __forceinline__ __device__ void gemm(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tCrB,
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Tensor0, typename Tensor1, typename Tensor2, typename Tensor3,
+template<bool patition_N=false, typename Tensor0, typename Tensor1, typename Tensor2, typename Tensor3,
          typename TiledMma, typename TiledCopy, typename ThrCopy>
 __forceinline__ __device__ void gemm_rs(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tCrB, Tensor3 const& tCsB,
                                TiledMma tiled_mma, TiledCopy smem_tiled_copy_B,
@@ -174,13 +174,27 @@ __forceinline__ __device__ void gemm_rs(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tC
     CUTE_STATIC_ASSERT_V(size<2>(tCrA) == size<2>(tCrB));                     // MMA_K
     Tensor tCrB_copy_view = smem_thr_copy_B.retile_D(tCrB);
     CUTE_STATIC_ASSERT_V(size<1>(tCsB) == size<1>(tCrB_copy_view));            // N
-    cute::copy(smem_tiled_copy_B, tCsB(_, _, _0{}), tCrB_copy_view(_, _, _0{}));
-    #pragma unroll
-    for (int i = 0; i < size<2>(tCrA); ++i) {
-        if (i < size<2>(tCrA) - 1) {
-            cute::copy(smem_tiled_copy_B, tCsB(_, _, i + 1), tCrB_copy_view(_, _, i + 1));
+    if (!patition_N) {
+        cute::copy(smem_tiled_copy_B, tCsB(_, _, _0{}), tCrB_copy_view(_, _, _0{}));
+        #pragma unroll
+        for (int i = 0; i < size < 2 > (tCrA); ++i) {
+            if (i < size < 2 > (tCrA) - 1) {
+                cute::copy(smem_tiled_copy_B, tCsB(_, _, i + 1), tCrB_copy_view(_, _, i + 1));
+            }
+            cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
         }
-        cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
+    } else {
+        // N loop (HeadDim)
+        Tensor tCrB_ = make_tensor(tCrB.data(), make_layout(get < 0 > (tCrB.layout()), get < 1 > (tCrB.layout()), make_layout(_1{}, _0{}), get < 2 > (tCrB.layout())));
+        Tensor acc_ = make_tensor(acc.data(), make_layout(get < 0 > (acc.layout()), get < 1 > (acc.layout()), make_layout(_1{}, _0{}), get < 2 > (acc.layout())));
+        cute::copy(smem_tiled_copy_B, tCsB(_, _0{}, _), tCrB_copy_view(_, _0{}, _));
+        #pragma unroll
+        for (int i = 0; i < size < 2 > (acc); ++i) {
+            if (i < size < 2 > (acc) - 1) {
+                cute::copy(smem_tiled_copy_B, tCsB(_, i + 1, _), tCrB_copy_view(_, i + 1, _));
+            }
+            cute::gemm(tiled_mma, tCrA, tCrB_(_, i, _, _), acc_(_, _, _, i));
+        }
     }
 }
 
