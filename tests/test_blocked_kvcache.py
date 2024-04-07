@@ -62,6 +62,7 @@ def test_flash_attention(b, s, h_q, h_kv, d):
     cache_seqlens = torch.full((b,), s, dtype=torch.int32)
 
     def blocked_flash_attn(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True)
+
     def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2), full_k.transpose(1, 2), full_v.transpose(1, 2)).transpose(1, 2)
 
     out_blocked_flash = blocked_flash_attn()

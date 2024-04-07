@@ -4,7 +4,6 @@ from torch.nn.functional import scaled_dot_product_attention
 
 from flash_attn import flash_attn_varlen_func
 
-
 b, s, h, d = 1, 4096, 128, 192
 v_dim = 128
 dtype = torch.bfloat16
@@ -32,12 +31,20 @@ def assert_close(x, y, name=""):
 
 
 def timer(func):
-    with torch.cuda.stream(torch.cuda.Stream()):
-        t = triton.testing.do_bench_cudagraph(func)
+    torch.cuda.synchronize()
+    st = torch.cuda.Event(True)
+    en = torch.cuda.Event(True)
+    st.record()
+    e = 100
+    for _ in range(e):
+        func()
+    en.record()
+    torch.cuda.synchronize()
+    t = st.elapsed_time(en) / e
     FLOPS = b * s * s * h * (d + v_dim) * 6
     bytes = b * s * h * (d + v_dim) * (torch.finfo(dtype).bits // 8)
 
-    print(f"{t} ms, {FLOPS / 10**9 / t} tflops, {bytes / 10**6 / t} GB/s")
+    print(f"{t} ms, {FLOPS / 10 ** 9 / t} tflops, {bytes / 10 ** 6 / t} GB/s")
     return t
 
 
