@@ -55,6 +55,7 @@ template<int kHeadDim_, int kBlockM_, int kBlockN_, int kNWarps_, bool Is_Q_in_r
          bool Share_KV_=false,
          bool gemm_o_patition_N_=false,
          int kNWarpsS_=0,
+         bool Blocked_KV_=true,
          typename Base=Flash_kernel_traits<kHeadDim_, kBlockM_, kBlockN_, kNWarps_, elem_type> >
 struct Flash_fwd_kernel_traits : public Base {
     using Element = typename Base::Element;
@@ -68,6 +69,7 @@ struct Flash_fwd_kernel_traits : public Base {
     static constexpr bool Is_Q_in_regs = Is_Q_in_regs_ || Share_Q_K_smem;
     static constexpr bool Share_KV = Share_KV_;
     static constexpr bool gemm_o_patition_N = gemm_o_patition_N_;
+    static constexpr bool Blocked_KV = Blocked_KV_;
 
     // The number of threads.
     static constexpr int kNWarps = kNWarps_;
