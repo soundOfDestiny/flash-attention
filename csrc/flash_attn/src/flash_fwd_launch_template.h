@@ -166,19 +166,15 @@ void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream)
     // TD [2023-08-28]: nvcc segfaults for headdim 96 with block size 64 x 256,
     // and for headdim 192 with block size 64 x 128.
     // Also for headdim 160 with block size 64 x 128 after the rotary addition.
-    auto dprops = at::cuda::getCurrentDeviceProperties();
     HEADDIMV_INFER_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
-    if (dprops->major == 8 && dprops->minor == 0) {  // A100
+        if constexpr (Headdim == 576 && kHeadDimV == 512) {
+            // Shared KV
+            run_flash_splitkv_fwd<Flash_fwd_kernel_traits<576, kBlockM, 32, 8, false, false, T, 512, true, true, 4>>(params, stream);
+            return;
+        }
         constexpr static int kBlockN = Headdim <= 64 ? 256 : (Headdim <= 128 ? 128 : (Headdim <= 256 ? 64 : 32));
         if (params.block_table != nullptr) assert(params.page_block_size == kBlockN);
         run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T, kHeadDimV>>(params, stream);
-    } else if (dprops->major == 9 && dprops->minor == 0) {  // H100
-        constexpr static int kBlockN = Headdim <= 64 ? 256 : (Headdim <= 128 ? 128 : (Headdim <= 256 ? 64 : 32));
-        if (params.block_table != nullptr) assert(params.page_block_size == kBlockN);
-        run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T, kHeadDimV>>(params, stream);
-    } else {
-        assert(false);
-    }
     });
 }
 
