@@ -1,3 +1,4 @@
+import triton
 import torch
 from torch.nn.functional import scaled_dot_product_attention
 
@@ -5,7 +6,7 @@ from flash_attn import flash_attn_varlen_func
 
 
 b, s, h, d = 1, 4096, 128, 192
-v_dim = 64
+v_dim = 128
 dtype = torch.bfloat16
 device = torch.device("cuda:0")
 torch.set_default_dtype(dtype)
@@ -31,18 +32,10 @@ def assert_close(x, y, name=""):
 
 
 def timer(func):
-    torch.cuda.synchronize()
-    st = torch.cuda.Event(True)
-    en = torch.cuda.Event(True)
-    st.record()
-    e = 100
-    for _ in range(e):
-        func()
-    en.record()
-    torch.cuda.synchronize()
-    t = st.elapsed_time(en) / e
-    FLOPS = b * s * s * h * d * 2 * 6
-    bytes = b * s * h * d * 2 * (torch.finfo(dtype).bits // 8)
+    with torch.cuda.stream(torch.cuda.Stream()):
+        t = triton.testing.do_bench_cudagraph(func)
+    FLOPS = b * s * s * h * (d + v_dim) * 6
+    bytes = b * s * h * (d + v_dim) * (torch.finfo(dtype).bits // 8)
 
     print(f"{t} ms, {FLOPS / 10**9 / t} tflops, {bytes / 10**6 / t} GB/s")
     return t
@@ -72,7 +65,7 @@ def test_flash_attention(b, s, h, d):
     def torch_attn():
         q2.grad = k2.grad = v2.grad = None
         return scaled_dot_product_attention(
-            q2.transpose(1, 2).float(), k2.transpose(1, 2).float(), v2.transpose(1, 2).float(), is_causal=True).transpose(1, 2)
+            q2.transpose(1, 2), k2.transpose(1, 2), v2.transpose(1, 2), is_causal=True).transpose(1, 2)
 
     out_flash_attn = flash_attn()
     out_torch_attn = torch_attn()
@@ -91,7 +84,7 @@ def test_flash_attention(b, s, h, d):
 
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
         flash_attn().backward(grad_triton)
-    print(prof.key_averages().table(sort_by="cuda_time_total", max_name_column_width=100))
+    print(prof.key_averages().table(sort_by="cuda_time_total", max_name_column_width=120))
     # prof.export_chrome_trace("tests/flash_attn_trace.json")
 
 

@@ -1,12 +1,13 @@
 import math
+import triton
 import torch
 from flash_attn.flash_attn_interface import get_kvcache_block_size, flash_attn_with_blocked_kvcache
 
-b, s, h_q, h_kv, d = 1, 131072, 64, 1, 576
+b, s, h_q, h_kv, d = 132, 4096, 128, 1, 576
 v_dim = 512
 block_size = get_kvcache_block_size(d)
 dtype = torch.bfloat16
-device = torch.device("cuda:0")
+device = torch.device("cuda:5")
 torch.set_default_dtype(dtype)
 torch.set_default_device(device)
 torch.cuda.set_device(device)
@@ -30,18 +31,10 @@ def assert_close(x, y, name=""):
 
 
 def timer(func, name=""):
-    torch.cuda.synchronize()
-    st = torch.cuda.Event(True)
-    en = torch.cuda.Event(True)
-    st.record()
-    e = 100
-    for _ in range(e):
-        func()
-    en.record()
-    torch.cuda.synchronize()
-    t = st.elapsed_time(en) / e
-    FLOPS = b * s * h_q * d * 2 * 2
-    bytes = b * s * h_kv * d * 2 * (torch.finfo(dtype).bits // 8)
+    with torch.cuda.stream(torch.cuda.Stream()):
+        t = triton.testing.do_bench_cudagraph(func)
+    FLOPS = b * s * h_q * (d + v_dim) * 2
+    bytes = b * s * h_kv * d * (torch.finfo(dtype).bits // 8)
 
     print(f"{t} ms, {FLOPS / 10 ** 9 / t} tflops, {bytes / 10 ** 6 / t} GB/s")
     return t
@@ -60,7 +53,7 @@ def test_flash_attention(b, s, h_q, h_kv, d):
     s_q = 1
     q = torch.randn(b, s_q, h_q, d)
     k = torch.randn(b, s, h_kv, d)
-    v = torch.randn(b, s, h_kv, v_dim)
+    v = k[..., :v_dim]
     full_k = k[:, :, :, None, :].expand(b, s, h_kv, h_q // h_kv, d).reshape(b, s, h_q, d)
     full_v = v[:, :, :, None, :].expand(b, s, h_kv, h_q // h_kv, v_dim).reshape(b, s, h_q, v_dim)
     blocked_k = k.view(-1, block_size, h_kv, d)
@@ -69,7 +62,7 @@ def test_flash_attention(b, s, h_q, h_kv, d):
     cache_seqlens = torch.full((b,), s, dtype=torch.int32)
 
     def blocked_flash_attn(): return flash_attn_with_blocked_kvcache(q, blocked_k, blocked_v, block_table, cache_seqlens, causal=True)
-    def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2).float(), full_k.transpose(1, 2).float(), full_v.transpose(1, 2).float()).transpose(1, 2)
+    def torch_attn(): return scaled_dot_product_attention(q.transpose(1, 2), full_k.transpose(1, 2), full_v.transpose(1, 2)).transpose(1, 2)
 
     out_blocked_flash = blocked_flash_attn()
     out_torch_attn = torch_attn()
@@ -80,7 +73,7 @@ def test_flash_attention(b, s, h_q, h_kv, d):
 
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
         blocked_flash_attn()
-    print(prof.key_averages().table(sort_by="cuda_time_total", max_name_column_width=100))
+    print(prof.key_averages().table(sort_by="cuda_time_total", max_name_column_width=120))
     # prof.export_chrome_trace("tests/flash_attn_trace.json")
 
 
