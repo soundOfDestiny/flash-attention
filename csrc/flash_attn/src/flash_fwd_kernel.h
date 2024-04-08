@@ -489,7 +489,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     constexpr int kBlockN = Kernel_traits::kBlockN;
     constexpr int kHeadDim = Kernel_traits::kHeadDim;
     constexpr int kHeadDimV = Kernel_traits::kHeadDimV;
-    constexpr int kNWarps = Kernel_traits::kNWarps;
+    constexpr int kNWarpsS = Kernel_traits::kNWarpsS;
 
     using GmemTiledCopyO = std::conditional_t<
         !Split,
@@ -877,7 +877,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
             // if (cute::thread0()) { print(acc_s); }
 
             mask.template apply_mask<Is_causal, Is_even_MN>(
-                acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+                acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarpsS * 16
             );
         }
 
@@ -1011,7 +1011,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         Tensor rP = make_tensor<Element>(acc_s.layout());
         if (Kernel_traits::kNThreadsS == Kernel_traits::kNThreads || tidx < Kernel_traits::kNThreadsS) {
             mask.template apply_mask</*Causal_mask=*/false>(
-                acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+                acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarpsS * 16
             );
             Tensor scale_o = softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
 
