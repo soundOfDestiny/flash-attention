@@ -513,6 +513,9 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                                cute::ceil_div((m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right, kBlockN));
     }
     if (n_block_min >= n_block_max) {  // This also covers the case where n_block_max <= 0
+        if (Kernel_traits::kNThreadsS < Kernel_traits::kNThreads && tidx >= Kernel_traits::kNThreadsS) {
+            return;
+        }
         // We exit early and write 0 to gOaccum and -inf to gLSEaccum.
         // Otherwise we might read OOB elements from gK and gV,
         // or get wrong results when we combine gOaccum from different blocks.
@@ -1040,7 +1043,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     // Epilogue
 
-    Tensor sRow_max = make_tensor(make_smem_ptr(reinterpret_cast<float *>(smem_)), typename Kernel_traits::SmemLayoutRow{});
+    Tensor sRow_max = make_tensor(sScale_o.data() + size(sScale_o), typename Kernel_traits::SmemLayoutRow{});
     Tensor tRow_maxsRow_max = sRow_max(_, tidx % Kernel_traits::kNThreadsS);
     Tensor sRow_sum = make_tensor(sRow_max.data() + size(sRow_max), typename Kernel_traits::SmemLayoutRow{});
     Tensor tRow_sumsRow_sum = sRow_sum(_, tidx % Kernel_traits::kNThreadsS);
