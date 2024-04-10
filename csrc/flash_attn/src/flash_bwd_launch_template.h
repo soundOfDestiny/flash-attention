@@ -294,10 +294,12 @@ void run_mha_bwd_hdim192(Flash_bwd_params &params, cudaStream_t stream) {
     if (status_ != cudaSuccess) {
       C10_CUDA_CHECK(status_);
     }
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    bool is_sm90 = dprops->major == 9 && dprops->minor > 0;
     HEADDIMV_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 136 * 1024) {
-            if constexpr(kHeadDimV == 128){
+            if (is_sm90) {
                 run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 128, 8, 2, 4, 2, false, false, T, kHeadDimV>, Is_dropout>(params, stream);
             } else {
                 run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T, kHeadDimV>, Is_dropout>(params, stream);

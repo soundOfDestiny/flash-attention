@@ -308,11 +308,13 @@ void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T>
 void run_mha_fwd_hdim192(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 192;
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    bool is_sm90 = dprops->major == 9 && dprops->minor > 0;
     HEADDIMV_SWITCH((params.d_v == params.d ? 0 : params.d_v), [&] {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {
             if constexpr(!Is_dropout) {
-                if constexpr(kHeadDimV == 128) {
+                if (is_sm90) {
                     run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 64, 4, false, false, T, kHeadDimV>, Is_dropout, Is_causal>(params, stream);
                 } else {
                     run_flash_fwd<Flash_fwd_kernel_traits<Headdim, 128, 64, 8, false, false, T, kHeadDimV>, Is_dropout, Is_causal>(params, stream);
