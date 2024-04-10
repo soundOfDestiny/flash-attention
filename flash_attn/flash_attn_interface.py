@@ -79,7 +79,7 @@ def _flash_attn_varlen_forward(
     window_size,
     alibi_slopes,
     return_softmax,
-    block_table,
+    block_table=None,
 ):
     maybe_contiguous = lambda x: x.contiguous() if x.stride(-1) != 1 else x
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
