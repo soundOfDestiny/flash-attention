@@ -240,7 +240,7 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split
 // splits as that would incur more HBM reads/writes.
 // So we find the best efficiency, then find the smallest number of splits that gets 85%
 // of the best efficiency.
-inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n_blocks, int max_splits) {
+inline int num_splits_heuristic(Flash_fwd_params &params, const int block_n, int batch_nheads_mblocks, int num_SMs, int num_n_blocks, int max_splits, const c10::optional<const at::Tensor> &seqlens_k_) {
     // If we have enough to almost fill the SMs, then just use 1 split
     if (batch_nheads_mblocks >= 0.8f * num_SMs) { return 1; }
     max_splits = std::min({max_splits, num_SMs, num_n_blocks});
@@ -248,6 +248,8 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
     std::vector<float> efficiency;
     efficiency.reserve(max_splits);
     auto ceildiv = [](int a, int b) { return (a + b - 1) / b; };
+    const c10::optional<const at::Tensor> seqlens_k_nblocks = seqlens_k_.has_value() ? c10::optional<const at::Tensor>((seqlens_k_.value() + params.seqlen_knew + block_n - 1).div(block_n, "trunc")) : c10::nullopt;
+    const int total_n_nblocks = seqlens_k_nblocks.has_value() ? seqlens_k_nblocks.value().sum().to(torch::kInt32).item<int32_t>() : 0;
     // Some splits are not eligible. For example, if we have 64 blocks and choose 11 splits,
     // we'll have 6 * 10 + 4 blocks. If we choose 12 splits, we'll have 6 * 11 + (-2) blocks
     // (i.e. it's 11 splits anyway).
@@ -261,6 +263,14 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
         } else {
             float n_waves = float(batch_nheads_mblocks * num_splits) / num_SMs;
             float eff = n_waves / ceil(n_waves);
+            if (total_n_nblocks) {
+                int split_size = ceildiv(num_n_blocks, num_splits);
+                double actual_waves = double(batch_nheads_mblocks / params.b * total_n_nblocks) / split_size / num_SMs;
+                eff = (actual_waves) / ceil(actual_waves);
+                if (eff > 1.f) {
+                    eff = 1.f;
+                }
+            }
             // printf("num_splits = %d, eff = %f\n", num_splits, eff);
             if (eff > max_efficiency) { max_efficiency = eff; }
             efficiency.push_back(eff);
@@ -279,7 +289,7 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
 void set_params_splitkv(Flash_fwd_params &params, const int batch_size,
     const int num_heads, const int head_size, const int max_seqlen_k, const int max_seqlen_q,
     const int head_size_v, const float p_dropout,
-    const int num_splits, cudaDeviceProp *dprops, struct c10::TensorOptions opts) {
+    const int num_splits, cudaDeviceProp *dprops, struct c10::TensorOptions opts, const c10::optional<const at::Tensor> &seqlens_k_ = c10::nullopt) {
 
     // This needs to match with run_mha_fwd_splitkv_dispatch
     const int block_n = head_size <= 64 ? 256 : (head_size <= 128 ? 128 : (head_size <= 256 ? 64 : 32));
@@ -290,7 +300,7 @@ void set_params_splitkv(Flash_fwd_params &params, const int batch_size,
     params.num_splits = num_splits;
     if (p_dropout == 0.0f) {  // SplitKV is not implemented for dropout
         if (num_splits < 1) {
-            params.num_splits = num_splits_heuristic(batch_size * num_heads * num_m_blocks, dprops->multiProcessorCount, num_n_blocks, 128);
+            params.num_splits = num_splits_heuristic(params, block_n, batch_size * num_heads * num_m_blocks, dprops->multiProcessorCount, num_n_blocks, 128, seqlens_k_);
         }
         if (params.num_splits > 1) {
             at::Tensor softmax_lse_accum = torch::empty({params.num_splits, batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
@@ -1400,6 +1410,8 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         params.vnew_row_stride = v.stride(-3);
         params.knew_head_stride = k.stride(-2);
         params.vnew_head_stride = v.stride(-2);
+    } else {
+        params.seqlen_knew = 0;
     }
 
     if (seqlens_k_.has_value()) {
@@ -1448,7 +1460,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
 
     set_params_splitkv(params, batch_size, num_heads,
                        head_size, seqlen_k, seqlen_q,
-                       head_size_v, /*dropout*/0.f, num_splits, dprops, opts);
+                       head_size_v, /*dropout*/0.f, num_splits, dprops, opts, seqlens_k_);
 
     if (paged_KV) {
         params.block_table = block_table.data_ptr<int>();

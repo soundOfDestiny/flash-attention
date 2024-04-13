@@ -539,15 +539,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         Tensor cO = make_identity_tensor(make_shape(size<0>(gOaccum), size<1>(gOaccum)));    // (BLK_M,BLK_K) -> (blk_m,blk_k)
         // Repeat the partitioning with identity layouts
         Tensor tOcO = gmem_thr_copy_Oaccum.partition_D(cO);
-        Tensor tOpO = make_tensor<bool>(make_shape(size<2>(tOgOaccum)));
-        if (!Is_even_K) {
-            #pragma unroll
-            for (int k = 0; k < size(tOpO); ++k) { tOpO(k) = get<1>(tOcO(0, 0, k)) < params.d; }
-        }
-        // Clear_OOB_K must be false since we don't want to write zeros to gmem
-        flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
-            gmem_tiled_copy_Oaccum, tOrOaccum, tOgOaccum, tOcO, tOpO, binfo.actual_seqlen_q - m_block * kBlockM
-        );
+        // Tensor tOpO = make_tensor<bool>(make_shape(size<2>(tOgOaccum)));
+        // if (!Is_even_K) {
+        //     #pragma unroll
+        //     for (int k = 0; k < size(tOpO); ++k) { tOpO(k) = get<1>(tOcO(0, 0, k)) < params.d; }
+        // }
+        // // Clear_OOB_K must be false since we don't want to write zeros to gmem
+        // flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/false, /*Clear_OOB_K=*/false>(
+        //     gmem_tiled_copy_Oaccum, tOrOaccum, tOgOaccum, tOcO, tOpO, binfo.actual_seqlen_q - m_block * kBlockM
+        // );
         #pragma unroll
         for (int m = 0; m < size<1>(tOgOaccum); ++m) {
             const int row = get<0>(tOcO(0, m, 0));
@@ -1294,11 +1294,13 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
         for (int m = 0; m < size<1>(tOrOaccum); ++m) {
             int row = get<0>(tOcOaccum(0, m, 0));
             ElementAccum lse_scale = sLSE[split][row];
-            #pragma unroll
-            for (int k = 0; k < size<2>(tOrOaccum); ++k) {
+            if (lse_scale != 0.f) {
                 #pragma unroll
-                for (int i = 0; i < size<0>(tOrOaccum); ++i) {
-                    tOrO(i, m, k) += lse_scale * tOrOaccum(i, m, k);
+                for (int k = 0; k < size<2>(tOrOaccum); ++k) {
+                    #pragma unroll
+                    for (int i = 0; i < size<0>(tOrOaccum); ++i) {
+                        tOrO(i, m, k) += lse_scale * tOrOaccum(i, m, k);
+                    }
                 }
             }
         // if (cute::thread0()) { printf("lse_scale = %f, %f\n", sLSE[split][0], sLSE[split][1]); print(tOrOaccum); }
